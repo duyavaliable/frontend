@@ -22,12 +22,10 @@ const Products = () => {
   const [error, setError] = useState(null);
 
   const determineStatus = useCallback((currentStock, minStockLevel) => {
-    // Nếu không có dữ liệu, mặc định là còn hàng
-    if (currentStock === undefined || minStockLevel === undefined) {
-      return 'instock';  // Sử dụng 'instock' thay vì 'active'
-    }
-    // Nếu tồn kho > mức tối thiểu thì còn hàng, ngược lại là hết hàng
-    return currentStock > minStockLevel ? 'instock' : 'outofstock';
+    const stockNum = parseInt(currentStock, 10) || 0;
+    const minLevelNum = parseInt(minStockLevel, 10) || 0;
+    
+    return stockNum > minLevelNum ? 'instock' : 'outofstock';
   }, []);
 
    // Lấy dữ liệu sản phẩm từ API
@@ -41,7 +39,7 @@ const Products = () => {
       const processedProducts = response.data.map(product => ({
         ...product,
       // Nếu API trả về trường status, chúng ta vẫn giữ lại để tương thích với backend
-      computed_status: determineStatus(product.stock_quantity, product.min_stock_level)
+      computed_status: determineStatus(product.current_stock, product.min_stock_level)
     }));
 
       setProducts(processedProducts);
@@ -140,10 +138,10 @@ const Products = () => {
       cost_price: '',
       description: '',
       supplier: '',
-      stock_quantity: 0,
+      current_stock: 0,
       status: 'instock',
       unit_of_measure: 'Cái',
-      min_stock_level: 10,
+      min_stock_level: 0,
       max_stock_level: 100,
     });
     setShowModal(true);
@@ -154,8 +152,12 @@ const Products = () => {
     // Chuyển đổi để đảm bảo trường selling_price/cost_price
     const mappedProduct = {
       ...product,
-      selling_price: product.selling_price ,
-      cost_price: product.cost_price
+    product_id: product.product_id, 
+    selling_price: parseFloat(product.selling_price || 0),
+    cost_price: parseFloat(product.cost_price || 0),
+    current_stock: parseInt(product.current_stock || 0),
+    min_stock_level: parseInt(product.min_stock_level || 0),
+    max_stock_level: parseInt(product.max_stock_level || 0)
     };
 
     setModalMode('edit');
@@ -188,14 +190,14 @@ const Products = () => {
         description: formData.description,
         category_id: formData.category_id,
         //selling_price/cost_price
-        stock_quantity: parseInt(formData.stock_quantity || 0),
+        current_stock: parseInt(formData.current_stock || 0),
         selling_price: parseFloat(formData.selling_price || 0),
         cost_price: parseFloat(formData.cost_price || 0),
         min_stock_level: parseInt(formData.min_stock_level || 0),
         max_stock_level: parseInt(formData.max_stock_level || 0),
         unit_of_measure: formData.unit_of_measure,
         supplier: formData.supplier,
-        status: determineStatus(formData.stock_quantity, formData.min_stock_level)
+        // status: determineStatus(formData.current_stock, formData.min_stock_level)
     };
 
 
@@ -209,7 +211,12 @@ const Products = () => {
       fetchProducts(); // Cập nhật lại danh sách sản phẩm
     } catch (error) {
       console.error('Lỗi khi lưu sản phẩm:', error);
+     // Hiển thị message lỗi từ server nếu có
+      if (error.response && error.response.data && error.response.data.message) {
+      alert(error.response.data.message);
+      } else {
       alert('Lưu sản phẩm không thành công. Vui lòng thử lại.');
+      }
     }
   };
 
@@ -278,7 +285,7 @@ const Products = () => {
           {getStatusDisplay(value)}
         </span>
         <div className="text-xs text-gray-500 mt-1">
-          SL: {row.original.stock_quantity || 0}/{row.original.min_stock_level || 0}
+          SL: {row.original.current_stock || 0}/{row.original.min_stock_level || 0}
         </div>
       </div>
         )
@@ -622,8 +629,8 @@ const Products = () => {
                 <input 
                   type="number" 
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  value={selectedProduct.stock_quantity || 0}
-                  onChange={(e) => setSelectedProduct({...selectedProduct, stock_quantity: parseInt(e.target.value, 10)})}
+                  value={selectedProduct.current_stock || 0}
+                  onChange={(e) => setSelectedProduct({...selectedProduct, current_stock: parseInt(e.target.value, 10)})}
                   min="0"
                 />
               </div>
@@ -634,7 +641,7 @@ const Products = () => {
                   type="number" 
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                   value={selectedProduct.min_stock_level || 0}
-                  onChange={(e) => setSelectedProduct({...selectedProduct, min_stock_level: e.target.value})}
+                  onChange={(e) => setSelectedProduct({...selectedProduct, min_stock_level: parseInt(e.target.value, 10) || 0})}
                   min="0"
                 />
               </div>
@@ -668,17 +675,22 @@ const Products = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700">Trạng thái</label>
-                <select 
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  value={selectedProduct.status || 'instock'}
-                  onChange={(e) => setSelectedProduct({...selectedProduct, status: e.target.value})}
-                >
-                  <option value="instock">Còn hàng</option>
-                  <option value="outofstock">Hết hàng</option>
-                </select>
+                <div className="mt-1">
+                  <div className={`px-3 py-2 rounded-md ${
+                    determineStatus(selectedProduct.current_stock, selectedProduct.min_stock_level) === 'instock' 
+                      ? 'bg-green-100 text-green-800' 
+                      : 'bg-red-100 text-red-800'
+                  }`}>
+                    {determineStatus(selectedProduct.current_stock, selectedProduct.min_stock_level) === 'instock' 
+                      ? 'Còn hàng' 
+                      : 'Hết hàng'}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Trạng thái được xác định tự động dựa trên số lượng tồn kho và mức tồn kho tối thiểu
+                  </p>
+                </div>
               </div>
             </div>
-            
             <div>
               <label className="block text-sm font-medium text-gray-700">Mô tả</label>
               <textarea 
