@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useTable, useSortBy, usePagination } from 'react-table';
 import { FaEdit, FaTrash, FaPlus } from 'react-icons/fa';
 import Button from '../common/Button';
 import Modal from '../common/Modal';
+
 // ????
 import API from '../../services/API';
 
@@ -20,8 +21,17 @@ const Products = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [error, setError] = useState(null);
 
+  const determineStatus = useCallback((currentStock, minStockLevel) => {
+    // Nếu không có dữ liệu, mặc định là còn hàng
+    if (currentStock === undefined || minStockLevel === undefined) {
+      return 'instock';  // Sử dụng 'instock' thay vì 'active'
+    }
+    // Nếu tồn kho > mức tối thiểu thì còn hàng, ngược lại là hết hàng
+    return currentStock > minStockLevel ? 'instock' : 'outofstock';
+  }, []);
+
    // Lấy dữ liệu sản phẩm từ API
-  const fetchProducts = async () => {
+  const fetchProducts = useCallback(async () => {
     try {
       setLoading(true);
       const response = await API.get('/products');
@@ -42,23 +52,23 @@ const Products = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [determineStatus]);
 
   // Lấy danh mục sản phẩm
-  const fetchCategories = async () => {
+  const fetchCategories = useCallback(async () => {
     try {
       const response = await API.get('/categories');
       setCategories(response.data);
     } catch (error) {
       console.error('Lỗi khi lấy danh mục:', error);
     }
-  };
+  }, []);
 
   // Load dữ liệu khi component được mount
   useEffect(() => {
     fetchProducts();
     fetchCategories();
-  }, []);
+  }, [fetchProducts, fetchCategories]);
 
   // Xử lý tìm kiếm sản phẩm
   const handleSearch = async () => {
@@ -120,7 +130,7 @@ const Products = () => {
   };
 
   // Thêm sản phẩm mới
-  const handleAddProduct = () => {
+  const handleAddProduct = useCallback(() => {
     setModalMode('add');
     setSelectedProduct({
       name: '',
@@ -131,16 +141,16 @@ const Products = () => {
       description: '',
       supplier: '',
       stock_quantity: 0,
-      status: 'active',
+      status: 'instock',
       unit_of_measure: 'Cái',
       min_stock_level: 10,
       max_stock_level: 100,
     });
     setShowModal(true);
-  };
+  }, []);
 
   // Chỉnh sửa sản phẩm
-  const handleEditProduct = (product) => {
+  const handleEditProduct = useCallback((product) => {
     // Chuyển đổi để đảm bảo trường selling_price/cost_price
     const mappedProduct = {
       ...product,
@@ -151,10 +161,10 @@ const Products = () => {
     setModalMode('edit');
     setSelectedProduct(mappedProduct);
     setShowModal(true);
-  };
+  }, []);
 
   // Xóa sản phẩm
-  const handleDeleteProduct = async (productId) => {
+  const handleDeleteProduct = useCallback(async (productId) => {
     // Thêm xác nhận xóa sản phẩm
     if (window.confirm('Bạn có chắc chắn muốn xóa sản phẩm này?')) {
       try {
@@ -166,7 +176,7 @@ const Products = () => {
         alert('Xóa sản phẩm không thành công. Vui lòng thử lại.');
       }
     }
-  };
+  }, [fetchProducts]);
 
   // Lưu sản phẩm (thêm mới hoặc cập nhật)
   const handleSaveProduct = async (formData) => {
@@ -178,12 +188,14 @@ const Products = () => {
         description: formData.description,
         category_id: formData.category_id,
         //selling_price/cost_price
+        stock_quantity: parseInt(formData.stock_quantity || 0),
         selling_price: parseFloat(formData.selling_price || 0),
         cost_price: parseFloat(formData.cost_price || 0),
         min_stock_level: parseInt(formData.min_stock_level || 0),
         max_stock_level: parseInt(formData.max_stock_level || 0),
         unit_of_measure: formData.unit_of_measure,
-        supplier: formData.supplier
+        supplier: formData.supplier,
+        status: determineStatus(formData.stock_quantity, formData.min_stock_level)
     };
 
 
@@ -204,7 +216,7 @@ const Products = () => {
   // Chuyển đổi trạng thái thành giá trị tương ứng cho UI
   const getStatusDisplay = (status) => {
     switch(status) {
-      case 'active': return 'Còn hàng';
+      case 'instock': return 'Còn hàng';
       case 'outofstock': return 'Hết hàng';
       default: return status;
     }
@@ -253,17 +265,22 @@ const Products = () => {
       },
       {
         Header: 'Trạng thái',
-        accessor: 'status',
-        Cell: ({ value }) => (
-          <span
+        accessor: row => row.computed_status || row.status,
+    Cell: ({ value, row }) => (
+      <div>
+        <span
           className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-            value === 'active'
+            value === 'instock'
               ? 'bg-green-100 text-green-800'
               : 'bg-red-100 text-red-800'
           }`}
         >
           {getStatusDisplay(value)}
         </span>
+        <div className="text-xs text-gray-500 mt-1">
+          SL: {row.original.stock_quantity || 0}/{row.original.min_stock_level || 0}
+        </div>
+      </div>
         )
       },
       {
@@ -286,7 +303,7 @@ const Products = () => {
         )
       },
     ],
-    []
+    [handleEditProduct, handleDeleteProduct]
   );
 
   const {
@@ -302,8 +319,7 @@ const Products = () => {
     gotoPage,
     nextPage,
     previousPage,
-    setPageSize,
-    state: { pageIndex, pageSize },
+    state: { pageIndex },
   } = useTable(
     {
       columns,
@@ -602,6 +618,17 @@ const Products = () => {
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
+                <label className="block text-sm font-medium text-gray-700">Số lượng tồn kho</label>
+                <input 
+                  type="number" 
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                  value={selectedProduct.stock_quantity || 0}
+                  onChange={(e) => setSelectedProduct({...selectedProduct, stock_quantity: parseInt(e.target.value, 10)})}
+                  min="0"
+                />
+              </div>
+
+              <div>
                 <label className="block text-sm font-medium text-gray-700">Mức tồn kho tối thiểu</label>
                 <input 
                   type="number" 
@@ -643,10 +670,10 @@ const Products = () => {
                 <label className="block text-sm font-medium text-gray-700">Trạng thái</label>
                 <select 
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  value={selectedProduct.status || 'active'}
+                  value={selectedProduct.status || 'instock'}
                   onChange={(e) => setSelectedProduct({...selectedProduct, status: e.target.value})}
                 >
-                  <option value="active">Còn hàng</option>
+                  <option value="instock">Còn hàng</option>
                   <option value="outofstock">Hết hàng</option>
                 </select>
               </div>
